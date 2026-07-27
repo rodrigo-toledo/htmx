@@ -1,5 +1,14 @@
 {{define "content"}}
 {{template "stats" .Stats}}
+<div class="toolbar">
+    <input type="search" name="q" placeholder="Search cards..."
+           hx-get="/search"
+           hx-trigger="input delay:300ms changed"
+           hx-target="#board"
+           hx-swap="innerHTML"
+           hx-indicator="#search-spinner">
+    <span id="search-spinner" class="htmx-indicator">searching...</span>
+</div>
 <div id="board" class="board">
     {{range .Columns}}
     {{template "column" .}}

@@ -5,11 +5,14 @@
         <button class="btn-move"
                 hx-post="/cards/{{.ID}}/move?dir=left"
                 hx-target="closest .column"
-                hx-swap="outerHTML">◀</button>
+                hx-swap="outerHTML"
+                hx-indicator="closest .card .move-spinner">◀</button>
         <button class="btn-move"
                 hx-post="/cards/{{.ID}}/move?dir=right"
                 hx-target="closest .column"
-                hx-swap="outerHTML">▶</button>
+                hx-swap="outerHTML"
+                hx-indicator="closest .card .move-spinner">▶</button>
+        <span class="move-spinner htmx-indicator">...</span>
         <button class="btn-edit"
                 hx-get="/cards/{{.ID}}/edit"
                 hx-target="#card-{{.ID}}"

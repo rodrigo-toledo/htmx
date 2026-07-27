@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -133,6 +134,19 @@ func (s *Store) Counts() map[string]int {
 		counts[c.Column]++
 	}
 	return counts
+}
+
+func (s *Store) SearchCards(query, col string) []Card {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []Card
+	q := strings.ToLower(query)
+	for _, c := range s.cards {
+		if c.Column == col && strings.Contains(strings.ToLower(c.Title), q) {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 var columnTitles = map[string]string{
@@ -384,6 +398,50 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	cols := []ColumnData{
+		{ID: "todo", Title: "Todo", Cards: store.SearchCards(q, "todo")},
+		{ID: "doing", Title: "Doing", Cards: store.SearchCards(q, "doing")},
+		{ID: "done", Title: "Done", Cards: store.SearchCards(q, "done")},
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	for _, col := range cols {
+		templates.ExecuteTemplate(w, "column", col)
+	}
+}
+
+func handleMoveCardPartial(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	dir := r.URL.Query().Get("dir")
+	card, oldCol, ok := store.MoveCard(id, dir)
+	if !ok {
+		http.Error(w, "cannot move", 400)
+		return
+	}
+
+	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Moved "%s" from %s to %s</div>`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
+	broadcastStats()
+
+	var buf bytes.Buffer
+
+	srcCol := ColumnData{ID: oldCol, Title: columnTitles[oldCol], Cards: store.CardsByColumn(oldCol)}
+	templates.ExecuteTemplate(&buf, "column", srcCol)
+
+	dstCol := ColumnData{ID: card.Column, Title: columnTitles[card.Column], Cards: store.CardsByColumn(card.Column)}
+	buf.WriteString(`<hx-partial hx-target="#col-` + card.Column + `" hx-swap="outerHTML">`)
+	templates.ExecuteTemplate(&buf, "column", dstCol)
+	buf.WriteString(`</hx-partial>`)
+
+	stats := getStats()
+	buf.WriteString(`<hx-partial hx-target="#stats" hx-swap="innerHTML">`)
+	templates.ExecuteTemplate(&buf, "stats_inner", stats)
+	buf.WriteString(`</hx-partial>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
 func main() {
 	store.Seed()
 	templates = template.Must(template.ParseGlob("templates/*.html"))
@@ -401,7 +459,9 @@ func main() {
 	r.Get("/cards/{id}/edit", handleEditCard)
 	r.Patch("/cards/{id}", handleUpdateCard)
 	r.Post("/cards/{id}/move", handleMoveCard)
+	r.Post("/cards/{id}/move-partial", handleMoveCardPartial)
 	r.Get("/events", handleEvents)
+	r.Get("/search", handleSearch)
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

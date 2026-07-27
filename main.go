@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -50,6 +51,44 @@ func (s *Store) CardsByColumn(col string) []Card {
 	return result
 }
 
+func (s *Store) GetCard(id int) (Card, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, c := range s.cards {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return Card{}, false
+}
+
+func (s *Store) AddCard(title, col string) Card {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := Card{ID: s.nextID, Title: title, Column: col}
+	s.nextID++
+	s.cards = append(s.cards, c)
+	return c
+}
+
+func (s *Store) DeleteCard(id int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, c := range s.cards {
+		if c.ID == id {
+			s.cards = append(s.cards[:i], s.cards[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+var columnTitles = map[string]string{
+	"todo":  "Todo",
+	"doing": "Doing",
+	"done":  "Done",
+}
+
 var (
 	store     = NewStore()
 	templates *template.Template
@@ -79,6 +118,49 @@ func renderPage(w http.ResponseWriter) {
 	}
 }
 
+func renderColumn(w http.ResponseWriter, col string) {
+	data := ColumnData{
+		ID:    col,
+		Title: columnTitles[col],
+		Cards: store.CardsByColumn(col),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "column", data); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
+
+func renderCard(w http.ResponseWriter, card Card) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "card", card); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
+
+func handleCreateCard(w http.ResponseWriter, r *http.Request) {
+	title := r.FormValue("title")
+	if title == "" {
+		title = "Untitled"
+	}
+	card := store.AddCard(title, "todo")
+	renderCard(w, card)
+}
+
+func handleDeleteCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	store.DeleteCard(id)
+	w.WriteHeader(200)
+}
+
+func handleGetColumn(w http.ResponseWriter, r *http.Request) {
+	col := chi.URLParam(r, "id")
+	if _, ok := columnTitles[col]; !ok {
+		http.Error(w, "not found", 404)
+		return
+	}
+	renderColumn(w, col)
+}
+
 func main() {
 	store.Seed()
 	templates = template.Must(template.ParseGlob("templates/*.html"))
@@ -89,6 +171,9 @@ func main() {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		renderPage(w)
 	})
+	r.Get("/columns/{id}", handleGetColumn)
+	r.Post("/cards", handleCreateCard)
+	r.Delete("/cards/{id}", handleDeleteCard)
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

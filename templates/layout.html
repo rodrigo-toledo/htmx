@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>htmx Kanban</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta6"
+            integrity="sha384-6lyVbhrs13b9z7mLOpt/N6R76rtkEBWgCjAXRs/DSWyi2AMnQSs10ijWk+PI8n7W"
+            crossorigin="anonymous"></script>
+</head>
+<body>
+    <header>
+        <h1>htmx Kanban</h1>
+    </header>
+    <main>
+        {{template "content" .}}
+    </main>
+</body>
+</html>

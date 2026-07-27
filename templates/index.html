@@ -1,0 +1,16 @@
+{{define "content"}}
+<div id="board" class="board">
+    {{range .Columns}}
+    <div class="column" id="col-{{.ID}}">
+        <h2>{{.Title}} <span class="count">({{len .Cards}})</span></h2>
+        <div class="cards">
+            {{range .Cards}}
+            <div class="card" id="card-{{.ID}}">
+                <span class="card-title">{{.Title}}</span>
+            </div>
+            {{end}}
+        </div>
+    </div>
+    {{end}}
+</div>
+{{end}}

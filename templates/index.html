@@ -1,20 +1,8 @@
 {{define "content"}}
+{{template "stats" .Stats}}
 <div id="board" class="board">
     {{range .Columns}}
-    <div class="column" id="col-{{.ID}}">
-        <h2>{{.Title}} <span class="count">({{len .Cards}})</span></h2>
-        {{if eq .ID "todo"}}
-        <form class="add-form" hx-post="/cards" hx-target="#col-todo .cards" hx-swap="beforeend">
-            <input type="text" name="title" placeholder="New card..." autocomplete="off">
-            <button type="submit">+</button>
-        </form>
-        {{end}}
-        <div class="cards">
-            {{range .Cards}}
-            {{template "card" .}}
-            {{end}}
-        </div>
-    </div>
+    {{template "column" .}}
     {{end}}
 </div>
 {{end}}

@@ -2,6 +2,14 @@
 <div class="card" id="card-{{.ID}}">
     <span class="card-title">{{.Title}}</span>
     <span class="card-actions">
+        <button class="btn-move"
+                hx-post="/cards/{{.ID}}/move?dir=left"
+                hx-target="closest .column"
+                hx-swap="outerHTML">◀</button>
+        <button class="btn-move"
+                hx-post="/cards/{{.ID}}/move?dir=right"
+                hx-target="closest .column"
+                hx-swap="outerHTML">▶</button>
         <button class="btn-edit"
                 hx-get="/cards/{{.ID}}/edit"
                 hx-target="#card-{{.ID}}"

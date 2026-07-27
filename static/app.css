@@ -187,3 +187,52 @@ main {
     color: #e94560;
     font-size: 0.8rem;
 }
+
+.stats {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: #16213e;
+    border-radius: 8px;
+}
+
+.stat {
+    font-size: 0.85rem;
+    color: #aaa;
+}
+
+.stat strong {
+    color: #eee;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #0f3460;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #e94560;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.btn-move {
+    background: none;
+    border: 1px solid #1a4080;
+    border-radius: 4px;
+    color: #888;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+}
+
+.btn-move:hover {
+    color: #eee;
+    border-color: #e94560;
+}

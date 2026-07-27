@@ -1,0 +1,16 @@
+{{define "stats"}}
+<div id="stats" class="stats">
+    {{template "stats_inner" .}}
+</div>
+{{end}}
+
+{{define "stats_inner"}}
+<span class="stat">Todo: <strong>{{.Todo}}</strong></span>
+<span class="stat">Doing: <strong>{{.Doing}}</strong></span>
+<span class="stat">Done: <strong>{{.Done}}</strong></span>
+{{if .Total}}
+<div class="progress-bar">
+    <div class="progress-fill" style="width: {{.Percent}}%"></div>
+</div>
+{{end}}
+{{end}}

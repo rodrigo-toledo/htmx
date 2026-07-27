@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"html/template"
 	"log"
 	"net/http"
@@ -95,6 +96,44 @@ func (s *Store) UpdateCard(id int, title string) (Card, bool) {
 	return Card{}, false
 }
 
+func (s *Store) MoveCard(id int, dir string) (Card, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	order := []string{"todo", "doing", "done"}
+	for i, c := range s.cards {
+		if c.ID == id {
+			cur := 0
+			for j, col := range order {
+				if col == c.Column {
+					cur = j
+					break
+				}
+			}
+			if dir == "right" && cur < len(order)-1 {
+				cur++
+			} else if dir == "left" && cur > 0 {
+				cur--
+			} else {
+				return c, c.Column, false
+			}
+			oldCol := s.cards[i].Column
+			s.cards[i].Column = order[cur]
+			return s.cards[i], oldCol, true
+		}
+	}
+	return Card{}, "", false
+}
+
+func (s *Store) Counts() map[string]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := map[string]int{"todo": 0, "doing": 0, "done": 0}
+	for _, c := range s.cards {
+		counts[c.Column]++
+	}
+	return counts
+}
+
 var columnTitles = map[string]string{
 	"todo":  "Todo",
 	"doing": "Doing",
@@ -114,6 +153,31 @@ type ColumnData struct {
 
 type PageData struct {
 	Columns []ColumnData
+	Stats   StatsData
+}
+
+type StatsData struct {
+	Todo    int
+	Doing   int
+	Done    int
+	Total   int
+	Percent int
+}
+
+func getStats() StatsData {
+	counts := store.Counts()
+	total := counts["todo"] + counts["doing"] + counts["done"]
+	pct := 0
+	if total > 0 {
+		pct = counts["done"] * 100 / total
+	}
+	return StatsData{
+		Todo:    counts["todo"],
+		Doing:   counts["doing"],
+		Done:    counts["done"],
+		Total:   total,
+		Percent: pct,
+	}
 }
 
 func renderPage(w http.ResponseWriter) {
@@ -123,6 +187,7 @@ func renderPage(w http.ResponseWriter) {
 			{ID: "doing", Title: "Doing", Cards: store.CardsByColumn("doing")},
 			{ID: "done", Title: "Done", Cards: store.CardsByColumn("done")},
 		},
+		Stats: getStats(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -212,6 +277,34 @@ func handleUpdateCard(w http.ResponseWriter, r *http.Request) {
 	renderCard(w, card)
 }
 
+func handleMoveCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	dir := r.URL.Query().Get("dir")
+	card, oldCol, ok := store.MoveCard(id, dir)
+	if !ok {
+		http.Error(w, "cannot move", 400)
+		return
+	}
+
+	var buf bytes.Buffer
+
+	srcCol := ColumnData{ID: oldCol, Title: columnTitles[oldCol], Cards: store.CardsByColumn(oldCol)}
+	templates.ExecuteTemplate(&buf, "column", srcCol)
+
+	dstCol := ColumnData{ID: card.Column, Title: columnTitles[card.Column], Cards: store.CardsByColumn(card.Column)}
+	buf.WriteString(`<div hx-swap-oob="outerHTML" id="col-` + card.Column + `">`)
+	templates.ExecuteTemplate(&buf, "column_inner", dstCol)
+	buf.WriteString(`</div>`)
+
+	stats := getStats()
+	buf.WriteString(`<div hx-swap-oob="outerHTML" id="stats">`)
+	templates.ExecuteTemplate(&buf, "stats_inner", stats)
+	buf.WriteString(`</div>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
 func main() {
 	store.Seed()
 	templates = template.Must(template.ParseGlob("templates/*.html"))
@@ -228,6 +321,7 @@ func main() {
 	r.Get("/cards/{id}", handleGetCard)
 	r.Get("/cards/{id}/edit", handleEditCard)
 	r.Patch("/cards/{id}", handleUpdateCard)
+	r.Post("/cards/{id}/move", handleMoveCard)
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

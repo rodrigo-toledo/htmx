@@ -179,13 +179,24 @@ func (h *SSEHub) Unsubscribe(ch chan string) {
 	close(ch)
 }
 
-func (h *SSEHub) Broadcast(event, data string) {
-	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
+// Broadcast sends one unnamed SSE message. Multi-line payloads are framed
+// with a "data:" prefix per line, as the SSE wire format requires. Unnamed
+// messages are what htmx 4's hx-sse extension swaps; the targeting lives in
+// the payload itself (hx-partial / hx-swap-oob fragments).
+func (h *SSEHub) Broadcast(data string) {
+	var msg strings.Builder
+	for _, line := range strings.Split(data, "\n") {
+		msg.WriteString("data: ")
+		msg.WriteString(line)
+		msg.WriteString("\n")
+	}
+	msg.WriteString("\n")
+	out := msg.String()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.clients {
 		select {
-		case ch <- msg:
+		case ch <- out:
 		default:
 		}
 	}
@@ -267,24 +278,53 @@ func renderCard(w http.ResponseWriter, card Card) {
 	}
 }
 
+// broadcastActivity pushes one unnamed SSE message to every connected tab:
+// an <hx-partial> that appends a feed item, plus an OOB innerMorph fragment
+// that refreshes the stats bar. htmx extracts both and swaps them into their
+// targets; nothing else on the page is touched.
+func broadcastActivity(action string) {
+	var buf bytes.Buffer
+	buf.WriteString(`<hx-partial hx-target="#feed-items" hx-swap="beforeend"><div class="feed-item">`)
+	buf.WriteString(template.HTMLEscapeString(action))
+	buf.WriteString(`</div></hx-partial>`)
+	templates.ExecuteTemplate(&buf, "stats_sse", getStats())
+	hub.Broadcast(buf.String())
+}
+
+func columnData(col string) ColumnData {
+	return ColumnData{ID: col, Title: columnTitles[col], Cards: store.CardsByColumn(col)}
+}
+
 func handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	if title == "" {
 		title = "Untitled"
 	}
 	card := store.AddCard(title, "todo")
-	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Created "%s" in Todo</div>`, card.Title))
-	broadcastStats()
-	renderCard(w, card)
+	broadcastActivity(fmt.Sprintf(`Created "%s" in Todo`, card.Title))
+
+	var buf bytes.Buffer
+	templates.ExecuteTemplate(&buf, "card", card)
+	templates.ExecuteTemplate(&buf, "count_oob", columnData("todo"))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
 }
 
 func handleDeleteCard(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	card, _ := store.GetCard(id)
+	card, ok := store.GetCard(id)
+	if !ok {
+		w.WriteHeader(204)
+		return
+	}
+	col := card.Column
 	store.DeleteCard(id)
-	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Deleted "%s"</div>`, card.Title))
-	broadcastStats()
-	w.WriteHeader(200)
+	broadcastActivity(fmt.Sprintf(`Deleted "%s"`, card.Title))
+
+	// The card itself is removed client-side via hx-swap="delete"; the
+	// response carries only the OOB count refresh for its column.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "count_oob", columnData(col))
 }
 
 func handleGetColumn(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +372,7 @@ func handleUpdateCard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", 404)
 		return
 	}
-	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Edited card to "%s"</div>`, card.Title))
+	broadcastActivity(fmt.Sprintf(`Edited card to "%s"`, card.Title))
 	renderCard(w, card)
 }
 
@@ -341,37 +381,20 @@ func handleMoveCard(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	card, oldCol, ok := store.MoveCard(id, dir)
 	if !ok {
-		http.Error(w, "cannot move", 400)
+		// 204 never swaps, so a stray boundary request can't clobber the column
+		w.WriteHeader(204)
 		return
 	}
 
-	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Moved "%s" from %s to %s</div>`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
-	broadcastStats()
+	broadcastActivity(fmt.Sprintf(`Moved "%s" from %s to %s`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
 
 	var buf bytes.Buffer
-
-	srcCol := ColumnData{ID: oldCol, Title: columnTitles[oldCol], Cards: store.CardsByColumn(oldCol)}
-	templates.ExecuteTemplate(&buf, "column", srcCol)
-
-	dstCol := ColumnData{ID: card.Column, Title: columnTitles[card.Column], Cards: store.CardsByColumn(card.Column)}
-	buf.WriteString(`<div hx-swap-oob="outerHTML" id="col-` + card.Column + `">`)
-	templates.ExecuteTemplate(&buf, "column_inner", dstCol)
-	buf.WriteString(`</div>`)
-
-	stats := getStats()
-	buf.WriteString(`<div hx-swap-oob="outerHTML" id="stats">`)
-	templates.ExecuteTemplate(&buf, "stats_inner", stats)
-	buf.WriteString(`</div>`)
+	templates.ExecuteTemplate(&buf, "column", columnData(oldCol))
+	templates.ExecuteTemplate(&buf, "column_oob", columnData(card.Column))
+	templates.ExecuteTemplate(&buf, "stats_oob", getStats())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(buf.Bytes())
-}
-
-func broadcastStats() {
-	stats := getStats()
-	var buf bytes.Buffer
-	templates.ExecuteTemplate(&buf, "stats_inner", stats)
-	hub.Broadcast("stats", buf.String())
 }
 
 func handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -383,6 +406,12 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	// Flush a comment immediately so response headers reach the client now,
+	// not at the first broadcast. Without this, Go buffers the response and
+	// htmx never sees the stream until some mutation happens.
+	fmt.Fprint(w, ": connected\n\n")
+	w.(http.Flusher).Flush()
 
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)
@@ -416,26 +445,21 @@ func handleMoveCardPartial(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	card, oldCol, ok := store.MoveCard(id, dir)
 	if !ok {
-		http.Error(w, "cannot move", 400)
+		w.WriteHeader(204)
 		return
 	}
 
-	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Moved "%s" from %s to %s</div>`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
-	broadcastStats()
+	broadcastActivity(fmt.Sprintf(`Moved "%s" from %s to %s`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
 
 	var buf bytes.Buffer
+	templates.ExecuteTemplate(&buf, "column", columnData(oldCol))
 
-	srcCol := ColumnData{ID: oldCol, Title: columnTitles[oldCol], Cards: store.CardsByColumn(oldCol)}
-	templates.ExecuteTemplate(&buf, "column", srcCol)
-
-	dstCol := ColumnData{ID: card.Column, Title: columnTitles[card.Column], Cards: store.CardsByColumn(card.Column)}
 	buf.WriteString(`<hx-partial hx-target="#col-` + card.Column + `" hx-swap="outerHTML">`)
-	templates.ExecuteTemplate(&buf, "column", dstCol)
+	templates.ExecuteTemplate(&buf, "column", columnData(card.Column))
 	buf.WriteString(`</hx-partial>`)
 
-	stats := getStats()
-	buf.WriteString(`<hx-partial hx-target="#stats" hx-swap="innerHTML">`)
-	templates.ExecuteTemplate(&buf, "stats_inner", stats)
+	buf.WriteString(`<hx-partial hx-target="#stats" hx-swap="outerHTML">`)
+	templates.ExecuteTemplate(&buf, "stats", getStats())
 	buf.WriteString(`</hx-partial>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

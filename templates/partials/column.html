@@ -4,8 +4,14 @@
 </div>
 {{end}}
 
+{{define "column_oob"}}
+<div class="column" id="col-{{.ID}}" hx-swap-oob="outerHTML">
+    {{template "column_inner" .}}
+</div>
+{{end}}
+
 {{define "column_inner"}}
-<h2>{{.Title}} <span class="count">({{len .Cards}})</span></h2>
+<h2>{{.Title}} <span class="count" id="count-{{.ID}}">({{len .Cards}})</span></h2>
 {{if eq .ID "todo"}}
 <form class="add-form" hx-post="/cards" hx-target="#col-todo .cards" hx-swap="beforeend">
     <input type="text" name="title" placeholder="New card..." autocomplete="off">
@@ -17,4 +23,8 @@
     {{template "card" .}}
     {{end}}
 </div>
+{{end}}
+
+{{define "count_oob"}}
+<span class="count" id="count-{{.ID}}" hx-swap-oob="outerHTML">({{len .Cards}})</span>
 {{end}}

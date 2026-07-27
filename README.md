@@ -1,12 +1,14 @@
 # htmx 4.x Kanban Board
 
 A minimal kanban board built to learn htmx 4 core concepts.
+See [GUIDE.md](GUIDE.md) for a feature-by-feature walkthrough of everything
+demonstrated here, and [PLAN.md](PLAN.md) for the staged build plan.
 
 ## Run
 
 ```bash
 go run .
-# open http://localhost:8080
+# open http://localhost:8080 in two tabs to see the real-time sync
 ```
 
 ## What it demonstrates
@@ -17,14 +19,14 @@ go run .
 | `hx-target` / `hx-swap` | Card swaps (`outerHTML`), list append (`beforeend`), removal (`delete`) |
 | Inline editing | Edit button → form → save/cancel/Escape |
 | Multi-target (OOB) | Move updates source column + dest column + stats in one response |
-| `<hx-partial>` (v4) | Alternative move endpoint: `POST /cards/{id}/move-partial` |
+| `<hx-partial>` (v4) | Alternative move endpoint + SSE payloads |
 | `hx-trigger` modifiers | Search: `input delay:300ms changed` |
 | `hx-confirm` | Delete confirmation dialog |
 | Request indicators | `htmx-indicator` spinner on move + search |
-| SSE real-time | Activity feed + live stats via `hx-sse:connect` |
+| SSE real-time (v4 model) | Unnamed messages carrying `hx-partial`/OOB fragments update feed + stats across tabs |
 | v4 error swaps | Empty title → 422 + form re-rendered with error |
-| `hx-swap="innerMorph"` | Stats bar morphs smoothly on SSE update |
-| Explicit inheritance | `hx-target:inherited` available on column wrappers |
+| `hx-swap="innerMorph"` | Stats bar morphs smoothly, preserving the progress-bar transition |
+| `htmx-config` meta | `sse.pauseOnBackground:false` keeps background tabs live |
 
 ## Comparing OOB vs `<hx-partial>`
 
@@ -36,9 +38,20 @@ Both endpoints do the same thing (move a card, update 3 regions):
 To switch the UI to `<hx-partial>`, change the move buttons in
 `templates/partials/card.html` from `/move` to `/move-partial`.
 
+## Tests
+
+A puppeteer-based end-to-end suite drives two real Chrome tabs through the
+whole flow (move, edit, validate, create, delete, search, cross-tab SSE):
+
+```bash
+cd e2e && npm install
+go run . &            # server on :8080
+node test.mjs
+```
+
 ## Architecture
 
 - **Go + chi** — single `main.go`, in-memory store, SSE via `http.Flusher`
 - **html/template** — server-rendered HTML partials
-- **htmx 4.0.0-beta6** — loaded via CDN with `hx-sse` extension
-- **No build step** — no npm, no bundler, no JS framework
+- **htmx 4.0.0-beta6** — loaded via CDN with the `hx-sse` extension
+- **No build step** — no npm, no bundler, no JS framework (the `e2e/` dir is dev tooling only)

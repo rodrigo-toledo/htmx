@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="htmx-config" content="sse.pauseOnBackground:false">
     <title>htmx Kanban</title>
     <link rel="stylesheet" href="/static/app.css">
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta6"
             integrity="sha384-6lyVbhrs13b9z7mLOpt/N6R76rtkEBWgCjAXRs/DSWyi2AMnQSs10ijWk+PI8n7W"
             crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta6/dist/ext/sse.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta6/dist/ext/hx-sse.min.js"
+            integrity="sha384-k3FOGGeM049iTmLw/5TvDh5u+ku311l7JTDjUXhWgD01QiEzDc9Z82c7aNW+R3wK"
+            crossorigin="anonymous"></script>
 </head>
 <body hx-sse:connect="/events">
     <header>

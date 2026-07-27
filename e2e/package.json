@@ -1,0 +1,12 @@
+{
+  "name": "htmx-kanban-e2e",
+  "private": true,
+  "description": "End-to-end tests for the htmx kanban board (puppeteer-core + local Chrome)",
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.4.0"
+  }
+}

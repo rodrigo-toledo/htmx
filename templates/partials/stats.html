@@ -1,5 +1,17 @@
 {{define "stats"}}
-<div id="stats" class="stats" hx-sse:swap="stats" hx-swap="innerMorph">
+<div id="stats" class="stats">
+    {{template "stats_inner" .}}
+</div>
+{{end}}
+
+{{define "stats_oob"}}
+<div id="stats" class="stats" hx-swap-oob="outerHTML">
+    {{template "stats_inner" .}}
+</div>
+{{end}}
+
+{{define "stats_sse"}}
+<div id="stats" hx-swap-oob="innerMorph">
     {{template "stats_inner" .}}
 </div>
 {{end}}

@@ -149,20 +149,31 @@ the "main" content, and tags the other two as out-of-band:
 
 ```go
 // main.go — handleMoveCard
-templates.ExecuteTemplate(&buf, "column", srcCol)   // main swap → source column
+templates.ExecuteTemplate(&buf, "column", columnData(oldCol))      // main swap → source column
+templates.ExecuteTemplate(&buf, "column_oob", columnData(card.Column)) // OOB → destination
+templates.ExecuteTemplate(&buf, "stats_oob", getStats())               // OOB → stats bar
+```
 
-buf.WriteString(`<div hx-swap-oob="outerHTML" id="col-doing">`)
-templates.ExecuteTemplate(&buf, "column_inner", dstCol)  // OOB → destination
-buf.WriteString(`</div>`)
-
-buf.WriteString(`<div hx-swap-oob="outerHTML" id="stats">`)
-templates.ExecuteTemplate(&buf, "stats_inner", stats)    // OOB → stats bar
-buf.WriteString(`</div>`)
+```html
+<!-- templates/partials/column.html -->
+{{define "column_oob"}}
+<div class="column" id="col-{{.ID}}" hx-swap-oob="outerHTML">
+    {{template "column_inner" .}}
+</div>
+{{end}}
 ```
 
 htmx pulls any element marked `hx-swap-oob` out of the response and swaps it
 into the matching element on the page. One HTTP round-trip, three coordinated
 updates, and the button's markup never had to know about the stats bar.
+
+**Gotcha (learned the hard way):** an `outerHTML` OOB swap *replaces the whole
+node*, so the fragment in the response must carry everything the original had —
+classes, ids, behavior attributes. Our first version hand-built the wrapper as
+`<div hx-swap-oob="outerHTML" id="col-doing">…</div>` and silently lost the
+`column` class: the destination column came back unstyled. That's why the OOB
+fragments here are full templates (`column_oob`, `stats_oob`) that mirror the
+originals exactly, with `hx-swap-oob` as the only addition.
 
 ---
 
@@ -180,21 +191,26 @@ element where each fragment declares its **own** target and swap:
 
 ```go
 // main.go — handleMoveCardPartial  (POST /cards/{id}/move-partial)
-templates.ExecuteTemplate(&buf, "column", srcCol)   // main swap, as before
+templates.ExecuteTemplate(&buf, "column", columnData(oldCol))   // main swap, as before
 
 buf.WriteString(`<hx-partial hx-target="#col-doing" hx-swap="outerHTML">`)
-templates.ExecuteTemplate(&buf, "column", dstCol)
+templates.ExecuteTemplate(&buf, "column", columnData(card.Column))
 buf.WriteString(`</hx-partial>`)
 
-buf.WriteString(`<hx-partial hx-target="#stats" hx-swap="innerHTML">`)
-templates.ExecuteTemplate(&buf, "stats_inner", stats)
+buf.WriteString(`<hx-partial hx-target="#stats" hx-swap="outerHTML">`)
+templates.ExecuteTemplate(&buf, "stats", getStats())   // full stats div, classes intact
 buf.WriteString(`</hx-partial>`)
 ```
 
-Notice the stats fragment uses `innerHTML` here (replace contents) where the OOB
-version used `outerHTML` (replace the node) — each fragment chooses
-independently. Both endpoints produce identical UX; flip the button URLs in
-`card.html` from `/move` to `/move-partial` to compare.
+Notice each fragment declares its own `hx-target` and `hx-swap` — you could
+swap the stats with `innerHTML` and the column with `outerHTML` in the same
+response if that suited you. Both endpoints produce identical UX; flip the
+button URLs in `card.html` from `/move` to `/move-partial` to compare.
+
+One asymmetry to know: for *non-outer* swap styles, htmx strips the
+`<hx-partial>` wrapper and swaps only its children; for outer styles the
+wrapper's content replaces the target. Either way, ship complete fragments
+(same rule as OOB in §1.7).
 
 **Rule of thumb:** OOB for "also update these," `<hx-partial>` when fragments
 need different swap strategies or you want the targeting spelled out.
@@ -278,12 +294,13 @@ into a sidebar while a `500` shows nothing.
 
 ### 2.6 Extension loading changed
 
-No more `hx-ext="sse"` attribute. Extensions are just scripts you include:
+No more `hx-ext="sse"` attribute. Extensions are just scripts you include —
+and note the v4 naming (`hx-sse.js`, not `sse.js`; the old path 404s):
 
 ```html
 <!-- templates/layout.html -->
-<script src=".../htmx.min.js"></script>
-<script src=".../dist/ext/sse.js"></script>
+<script src=".../dist/htmx.min.js"></script>
+<script src=".../dist/ext/hx-sse.min.js"></script>
 ```
 
 Then `hx-sse:connect` works anywhere. The `htmax.js` bundle ships htmx + the
@@ -292,37 +309,68 @@ you want them all.
 
 ### 2.7 SSE extension — real-time as an attribute
 
-With the extension loaded, the whole page subscribes:
+v4 rewrote the SSE extension around `fetch()` streams, and **the mental model
+changed from htmx 2**. Two rules:
+
+1. **Unnamed messages** (just `data:`, no `event:` field) are swapped
+   automatically, using the connected element's `hx-target`/`hx-swap`.
+2. **Named messages** (`event: foo`) are *not* swapped — they're dispatched as
+   DOM events, which you handle with `hx-on:foo` or
+   `hx-trigger="foo from:body"`.
+
+Our board needs to update *two* regions (feed + stats) from one stream, so we
+use the docs' "update elements" pattern: the server streams **unnamed**
+messages whose payload carries its own targeting via `<hx-partial>` and
+`hx-swap-oob`:
+
+```go
+// main.go — broadcastActivity
+buf.WriteString(`<hx-partial hx-target="#feed-items" hx-swap="beforeend"><div class="feed-item">`)
+buf.WriteString(template.HTMLEscapeString(action))
+buf.WriteString(`</div></hx-partial>`)
+templates.ExecuteTemplate(&buf, "stats_sse", getStats())  // <div id="stats" hx-swap-oob="innerMorph">…
+hub.Broadcast(buf.String())
+```
+
+Client side is two attributes on the page shell — no per-element SSE markup:
 
 ```html
 <!-- templates/layout.html -->
 <body hx-sse:connect="/events">
 ```
 
-And any element can react to named events by swapping their payload:
+When a message arrives, htmx extracts the `hx-partial` and OOB fragments, swaps
+each into its target, and — because nothing is left over and the extension
+defaults to `swapEmpty:false` — the connected `<body>` itself is untouched.
 
-```html
-<!-- append each activity event as a new child -->
-<div class="feed-items" hx-sse:swap="activity" hx-swap="beforeend"></div>
+The stats fragment uses `hx-swap-oob="innerMorph"`: idiommorph patches the
+existing nodes in place, so the `.progress-fill` element survives and its CSS
+`width` transition *animates* to the new percentage instead of snapping.
 
-<!-- replace stats contents on each stats event -->
-<div id="stats" hx-sse:swap="stats" hx-swap="innerMorph">
-```
+Two server-side gotchas we hit, both invisible in `curl` but fatal in-browser:
 
-The server side is just the standard SSE wire format — `event:`, `data:`, blank
-line — emitted from a Go channel hub:
-
-```go
-// main.go
-msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
-fmt.Fprint(w, msg)
-flusher.Flush()
-```
+- **Flush headers immediately.** Go buffers the response until the first
+  write, so without an initial `fmt.Fprint(w, ": connected\n\n")` + `Flush()`,
+  the client sees *nothing* — not even response headers — until the first
+  broadcast. htmx's connection hook never fires and early events are lost.
+- **`sse.pauseOnBackground` defaults to `true`**, pausing the stream in
+  background tabs. With no `Last-Event-ID` replay on our server, paused tabs
+  would miss events forever. We disable it in the layout:
+  `<meta name="htmx-config" content="sse.pauseOnBackground:false">`.
 
 The crucial architecture note: **SSE is a side-channel, not the source of
 truth.** The tab that performed the move updates via the normal htmx response
 (OOB). *Other* tabs update via SSE. Same server state, two delivery paths, no
 client-side model to reconcile. Open two tabs and move a card to see both.
+
+If you *do* want named events, the v4 shape is:
+
+```html
+<!-- server sends: event: progress / data: 50 -->
+<div hx-on:progress="htmx.find('#p').value = event.detail.data">…</div>
+<!-- or use the event as a trigger for a fresh request -->
+<div hx-get="/status" hx-trigger="progress from:body"></div>
+```
 
 ### 2.8 Other v4 changes worth knowing
 
@@ -378,8 +426,8 @@ Alpine at exactly these seams and measure what it buys.
 | `hx-swap="beforeend"` | index.html | append new card |
 | `hx-confirm` | card.html | delete confirmation |
 | `hx-indicator` | card.html, index.html | loading feedback |
-| `hx-swap-oob` | main.go (OOB handler) | multi-target update |
-| `<hx-partial>` | main.go (partial handler) | explicit multi-target |
+| `hx-swap-oob` | main.go (OOB handler), SSE payloads | multi-target update |
+| `<hx-partial>` | main.go (partial handler + SSE payloads) | explicit multi-target |
 | `hx-sse:connect` | layout.html | subscribe to `/events` |
-| `hx-sse:swap` | index.html, stats.html | react to named events |
-| `hx-swap="innerMorph"` | stats.html | state-preserving SSE updates |
+| `hx-swap="innerMorph"` | stats templates | state-preserving updates (OOB + SSE) |
+| `htmx-config` meta | layout.html | `sse.pauseOnBackground:false` |

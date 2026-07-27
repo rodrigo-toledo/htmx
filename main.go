@@ -83,6 +83,18 @@ func (s *Store) DeleteCard(id int) bool {
 	return false
 }
 
+func (s *Store) UpdateCard(id int, title string) (Card, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, c := range s.cards {
+		if c.ID == id {
+			s.cards[i].Title = title
+			return s.cards[i], true
+		}
+	}
+	return Card{}, false
+}
+
 var columnTitles = map[string]string{
 	"todo":  "Todo",
 	"doing": "Doing",
@@ -161,6 +173,45 @@ func handleGetColumn(w http.ResponseWriter, r *http.Request) {
 	renderColumn(w, col)
 }
 
+func handleGetCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	card, ok := store.GetCard(id)
+	if !ok {
+		http.Error(w, "not found", 404)
+		return
+	}
+	renderCard(w, card)
+}
+
+func handleEditCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	card, ok := store.GetCard(id)
+	if !ok {
+		http.Error(w, "not found", 404)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "card_edit", card)
+}
+
+func handleUpdateCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	title := r.FormValue("title")
+	if title == "" {
+		card, _ := store.GetCard(id)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(422)
+		templates.ExecuteTemplate(w, "card_edit_error", card)
+		return
+	}
+	card, ok := store.UpdateCard(id, title)
+	if !ok {
+		http.Error(w, "not found", 404)
+		return
+	}
+	renderCard(w, card)
+}
+
 func main() {
 	store.Seed()
 	templates = template.Must(template.ParseGlob("templates/*.html"))
@@ -174,6 +225,9 @@ func main() {
 	r.Get("/columns/{id}", handleGetColumn)
 	r.Post("/cards", handleCreateCard)
 	r.Delete("/cards/{id}", handleDeleteCard)
+	r.Get("/cards/{id}", handleGetCard)
+	r.Get("/cards/{id}/edit", handleEditCard)
+	r.Patch("/cards/{id}", handleUpdateCard)
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

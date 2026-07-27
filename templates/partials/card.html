@@ -1,10 +1,16 @@
 {{define "card"}}
 <div class="card" id="card-{{.ID}}">
     <span class="card-title">{{.Title}}</span>
-    <button class="btn-delete"
-            hx-delete="/cards/{{.ID}}"
-            hx-target="#card-{{.ID}}"
-            hx-swap="delete"
-            hx-confirm="Delete this card?">×</button>
+    <span class="card-actions">
+        <button class="btn-edit"
+                hx-get="/cards/{{.ID}}/edit"
+                hx-target="#card-{{.ID}}"
+                hx-swap="outerHTML">Edit</button>
+        <button class="btn-delete"
+                hx-delete="/cards/{{.ID}}"
+                hx-target="#card-{{.ID}}"
+                hx-swap="delete"
+                hx-confirm="Delete this card?">×</button>
+    </span>
 </div>
 {{end}}

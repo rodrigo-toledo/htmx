@@ -236,3 +236,38 @@ main {
     color: #eee;
     border-color: #e94560;
 }
+
+.activity-feed {
+    margin-top: 1.5rem;
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.activity-feed h3 {
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 0.75rem;
+}
+
+.feed-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.feed-item {
+    font-size: 0.8rem;
+    color: #aaa;
+    padding: 0.3rem 0.5rem;
+    background: #0f3460;
+    border-radius: 4px;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}

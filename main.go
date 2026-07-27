@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -140,6 +141,44 @@ var columnTitles = map[string]string{
 	"done":  "Done",
 }
 
+type SSEHub struct {
+	mu      sync.RWMutex
+	clients map[chan string]bool
+}
+
+func NewSSEHub() *SSEHub {
+	return &SSEHub{clients: make(map[chan string]bool)}
+}
+
+func (h *SSEHub) Subscribe() chan string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ch := make(chan string, 16)
+	h.clients[ch] = true
+	return ch
+}
+
+func (h *SSEHub) Unsubscribe(ch chan string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.clients, ch)
+	close(ch)
+}
+
+func (h *SSEHub) Broadcast(event, data string) {
+	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.clients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+var hub = NewSSEHub()
+
 var (
 	store     = NewStore()
 	templates *template.Template
@@ -220,12 +259,17 @@ func handleCreateCard(w http.ResponseWriter, r *http.Request) {
 		title = "Untitled"
 	}
 	card := store.AddCard(title, "todo")
+	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Created "%s" in Todo</div>`, card.Title))
+	broadcastStats()
 	renderCard(w, card)
 }
 
 func handleDeleteCard(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	card, _ := store.GetCard(id)
 	store.DeleteCard(id)
+	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Deleted "%s"</div>`, card.Title))
+	broadcastStats()
 	w.WriteHeader(200)
 }
 
@@ -274,6 +318,7 @@ func handleUpdateCard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", 404)
 		return
 	}
+	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Edited card to "%s"</div>`, card.Title))
 	renderCard(w, card)
 }
 
@@ -285,6 +330,9 @@ func handleMoveCard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot move", 400)
 		return
 	}
+
+	hub.Broadcast("activity", fmt.Sprintf(`<div class="feed-item">Moved "%s" from %s to %s</div>`, card.Title, columnTitles[oldCol], columnTitles[card.Column]))
+	broadcastStats()
 
 	var buf bytes.Buffer
 
@@ -305,6 +353,37 @@ func handleMoveCard(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 }
 
+func broadcastStats() {
+	stats := getStats()
+	var buf bytes.Buffer
+	templates.ExecuteTemplate(&buf, "stats_inner", stats)
+	hub.Broadcast("stats", buf.String())
+}
+
+func handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	for {
+		select {
+		case msg := <-ch:
+			fmt.Fprint(w, msg)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
 func main() {
 	store.Seed()
 	templates = template.Must(template.ParseGlob("templates/*.html"))
@@ -322,6 +401,7 @@ func main() {
 	r.Get("/cards/{id}/edit", handleEditCard)
 	r.Patch("/cards/{id}", handleUpdateCard)
 	r.Post("/cards/{id}/move", handleMoveCard)
+	r.Get("/events", handleEvents)
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

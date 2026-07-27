@@ -5,4 +5,9 @@
     {{template "column" .}}
     {{end}}
 </div>
+<aside id="activity-feed" class="activity-feed">
+    <h3>Activity</h3>
+    <div class="feed-items" hx-sse:swap="activity" hx-swap="beforeend">
+    </div>
+</aside>
 {{end}}

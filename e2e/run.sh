@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 BIN="$(mktemp -d)/kanban"
 go build -o "$BIN" .
 
-SUITES="${*:-test replay dnd}"
+SUITES="${*:-test replay dnd modal}"
 status=0
 for suite in $SUITES; do
     echo "--- suite: $suite ---"

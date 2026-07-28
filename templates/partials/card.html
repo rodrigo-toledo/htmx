@@ -33,9 +33,7 @@
             hx-target="#card-{{.ID}}"
             hx-swap="outerHTML">Edit</button>
     <button class="btn-delete"
-            hx-delete="/cards/{{.ID}}"
-            hx-target="#col-{{.Column}}"
-            hx-swap="outerHTML"
-            hx-confirm="Delete this card?">×</button>
+            data-id="{{.ID}}" data-col="{{.Column}}" data-title="{{.Title}}"
+            @click="open($el)">×</button>
 </span>
 {{end}}

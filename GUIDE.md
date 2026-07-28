@@ -496,22 +496,94 @@ This "re-init JS widgets after swaps" pattern is the standard cost of mixing
 stateful client libraries with htmx's replace-the-DOM model. It's small here,
 but it's exactly the friction that grows as you add more widgets.
 
-The remaining seams — where Alpine *would* earn its keep — are the other
-client-only concerns:
+### 3.1 What Alpine actually provides — the delete modal
 
-- **Optimistic UI** — the card waits for the server before moving on button
-  clicks. (v4's `hx-optimistic` extension softens this; drag-and-drop is
-  naturally optimistic since SortableJS moves it first.)
-- **Transient client state** — a custom delete-confirm modal, a dropdown, a
-  popover. All pure client, all awkward in htmx.
-- **Rich client validation** — we rely on the server's 422; instant
-  per-keystroke rules are client territory.
+The app's first Alpine feature replaces the browser's ugly native
+`hx-confirm` dialog with a real modal. This is the textbook Alpine seam, and
+it's worth naming precisely what Alpine is doing, because it's a *different
+job* from SortableJS's.
 
-That's the natural seam for **Alpine.js**: `x-data` for local state,
-`x-show` / `x-transition` for the transient bits, while htmx keeps owning
-everything that touches the server. htmx even ships an `hx-alpine-compat`
-extension so the two initialize swapped fragments together. The next pass on
-this project is to add Alpine at exactly these seams and measure what it buys.
+**Alpine provides reactive client-side state bound to the DOM, declaratively,
+with no framework and no build step.** Concretely, in this modal:
+
+| Alpine feature | What it gives us |
+|---|---|
+| `x-data="deleteModal"` | a reactive state object (`deleting`) scoped to the modal |
+| `x-show="deleting"` | show/hide the backdrop, re-evaluated whenever `deleting` changes |
+| `x-transition.opacity` | a fade without writing CSS/JS animation |
+| `x-text="deleting.title"` | bind the card title into the dialog, auto-escaped |
+| `@click.self="deleting = null"` | close on backdrop click (`.self` = only the backdrop itself) |
+| `@keydown.escape.window="deleting = null"` | close on Escape, from anywhere |
+
+None of this touches the server. Whether the modal is open, and which card is
+pending, is **transient UI state** — exactly what htmx has no mechanism for.
+With htmx alone you'd hand-roll `addEventListener`, toggle classes, and manage
+focus yourself. Alpine collapses all of it into attributes.
+
+The division of labor is clean and deliberate:
+
+```js
+// static/app.js
+Alpine.data('deleteModal', () => ({
+    deleting: null,
+    open(el) { this.deleting = { /* …from data-* attrs… */ }; },  // Alpine owns the UI state
+    confirm() {
+        const card = this.deleting;
+        this.deleting = null;                                      // close (Alpine)
+        htmx.ajax('DELETE', `/cards/${card.id}`, {                 // delete (htmx)
+            target: `#col-${card.col}`, swap: 'outerHTML',
+        });
+    },
+}));
+```
+
+Alpine owns *the dialog*; htmx owns *the deletion*. The confirm button hands
+off to `htmx.ajax()` — the same API the drag-and-drop uses — and the confluent
+response/SSE re-render updates every tab as before.
+
+**The integration glue: `hx-alpine-compat`.** Alpine initializes elements on
+page load, but htmx constantly swaps in *new* elements (every column
+re-render creates fresh delete buttons with `@click`). Left alone, those
+swapped-in handlers would be dead. The `hx-alpine-compat` extension
+initializes Alpine on each fragment as it swaps in — the Alpine analogue of
+the SortableJS re-init above. The e2e suite proves it: it creates a card
+(htmx swap) then deletes it via the modal, which only works if Alpine bound
+the brand-new button.
+
+**One gotcha surfaced by testing:** Alpine's effect flush is driven by
+`requestAnimationFrame`, which browsers pause in *background* tabs. So an
+Alpine update in a hidden tab stalls until it's refocused. This never bites
+real users (you interact with the focused tab), but it's why the e2e suites
+call `bringToFront()` before driving the modal — and it's a good reminder that
+Alpine state is for the tab you're looking at, while htmx/SSE keep the
+*background* tabs in sync.
+
+### 3.2 What else Alpine is good for
+
+The modal is one instance of a general rule: **reach for Alpine when the
+state is real but shouldn't round-trip.** Good fits, in roughly increasing
+size:
+
+- **Disclosure widgets** — dropdowns, popovers, mobile nav, tooltips. The
+  open/closed flag plus `@click.outside` to dismiss is Alpine's sweet spot.
+- **Tabs / accordions / carousels** — which panel is active is pure client
+  state; the panel *content* can still be htmx-loaded.
+- **Transient form UX** — character counters, password-strength meters,
+  show/hide password, "unsaved changes" warnings, instant client-side
+  validation feedback *before* the server's 422.
+- **Optimistic / pending states** — disabling a button and showing a spinner
+  the instant it's clicked, while the htmx request is in flight.
+- **Client-only filtering/sorting of already-loaded data** — e.g. a quick
+  filter over the cards in one column without a request (contrast the
+  server-driven search box, which *does* round-trip).
+- **Small composed interactions** — a "select all / bulk action" bar that
+  appears when checkboxes are ticked; the bulk action itself is still an
+  htmx POST.
+
+The line to hold: **Alpine for state that lives and dies in the browser;
+htmx for state that belongs to the server.** The moment a piece of UI needs to
+survive a refresh, be seen by another tab, or be the source of truth — it's
+htmx's job, and Alpine should just hand off with `htmx.ajax()`.
 
 ---
 

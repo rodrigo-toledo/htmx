@@ -9,10 +9,25 @@
            hx-indicator="#search-spinner">
     <span id="search-spinner" class="htmx-indicator">searching...</span>
 </div>
-<div id="board" class="board">
-    {{range .Columns}}
-    {{template "column" .}}
-    {{end}}
+<div x-data="deleteModal">
+    <div id="board" class="board">
+        {{range .Columns}}
+        {{template "column" .}}
+        {{end}}
+    </div>
+
+    <div class="modal-backdrop" x-show="deleting" x-cloak
+         @click.self="deleting = null" @keydown.escape.window="deleting = null">
+        <div class="modal" x-show="deleting"
+             x-transition.opacity.duration.150ms>
+            <p class="modal-title">Delete this card?</p>
+            <p class="modal-card" x-text="deleting ? deleting.title : ''"></p>
+            <div class="modal-actions">
+                <button type="button" @click="deleting = null">Cancel</button>
+                <button type="button" class="danger" @click="confirm()">Delete</button>
+            </div>
+        </div>
+    </div>
 </div>
 <aside id="activity-feed" class="activity-feed">
     <h3>Activity</h3>

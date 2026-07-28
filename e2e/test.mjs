@@ -52,6 +52,12 @@ for (let i = 0; i < 50; i++) {
 check('A: SSE connection established', await sseUp(tabA));
 check('B: SSE connection established', await sseUp(tabB));
 
+// tabA is backgrounded once tabB exists; Chrome pauses rAF in hidden tabs,
+// which stalls Alpine's effect flush (the delete modal wouldn't open/close).
+// A real user acts in the focused tab, so bring tabA to the front.
+await tabA.bringToFront();
+await sleep(200);
+
 // --- initial render ---
 check('A: 3 columns rendered', await page_count(tabA, '.column') === 3);
 check('A: stats bar has class', await hasClass(tabA, '#stats', 'stats'));
@@ -124,10 +130,11 @@ check('A: todo count updated on create', (await text(tabA, '#count-todo')) === '
 check('B: create arrived via SSE', (await text(tabB, '#feed-items')).includes('Fresh card'));
 check('B: new card on board via SSE', (await text(tabB, '#col-todo .cards')).includes('Fresh card'));
 
-// --- delete: confirm dialog + count updates ---
-tabA.once('dialog', (d) => d.accept());
+// --- delete: Alpine modal confirm + count updates ---
 await click(tabA, '#col-todo .card:last-child .btn-delete');
-await sleep(500);
+await sleep(300);
+await click(tabA, '.modal-actions .danger');
+await sleep(600);
 check('A: card removed', !(await text(tabA, '#col-todo .cards')).includes('Fresh card'));
 check('A: todo count updated on delete', (await text(tabA, '#count-todo')) === '(2)');
 check('B: card removed on board via SSE', !(await text(tabB, '#col-todo .cards')).includes('Fresh card'));

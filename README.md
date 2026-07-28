@@ -42,15 +42,26 @@ To switch the UI to `<hx-partial>`, change the move buttons in
 
 ## Tests
 
-Puppeteer-based end-to-end suites drive two real Chrome tabs through the app.
-Each suite runs against a fresh server instance:
+Two layers, a fast inner loop and a slow real-browser one:
 
 ```bash
+go test ./...            # unit + handler tests (~0.5s, no browser)
+
 cd e2e && npm install && cd ..
-./e2e/run.sh            # all suites
-./e2e/run.sh replay     # just one
+./e2e/run.sh             # all e2e suites (drives real Chrome)
+./e2e/run.sh replay      # just one
 ```
 
+**Go (`go test ./...`)**
+- `store_test.go` — pure unit tests for the store: move boundaries, drop
+  index math (cross-column, reorder, out-of-range), search, counts, CRUD
+- `handlers_test.go` — `httptest` tests of the hypermedia contract: each
+  endpoint returns the right HTML fragments, ids, `hx-swap-oob` attributes
+  and status codes; plus the SSE wire format (immediate header flush,
+  `id:`/`data:` frames on broadcast)
+
+**End-to-end (`./e2e/run.sh`)** — puppeteer drives two real Chrome tabs;
+each suite runs against a fresh server instance:
 - `test.mjs` — move, edit, 422 validation, create/delete counts, search,
   cross-tab SSE, console hygiene (32 checks)
 - `replay.mjs` — kills one tab's stream, mutates from the other, and asserts

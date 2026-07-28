@@ -43,6 +43,16 @@ func (s *Store) Seed() {
 	s.nextID++
 }
 
+// Reset returns the store to a freshly-seeded state (cards 1–4). Used by
+// tests to isolate cases from one another.
+func (s *Store) Reset() {
+	s.mu.Lock()
+	s.cards = nil
+	s.nextID = 1
+	s.mu.Unlock()
+	s.Seed()
+}
+
 func (s *Store) CardsByColumn(col string) []Card {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -611,11 +621,7 @@ func handleMoveCardPartial(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 }
 
-func main() {
-	store.Seed()
-	templates = template.Must(template.ParseGlob("templates/*.html"))
-	templates = template.Must(templates.ParseGlob("templates/partials/*.html"))
-
+func newRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -632,7 +638,18 @@ func main() {
 	r.Post("/cards/{id}/drop", handleDropCard)
 	r.Get("/events", handleEvents)
 	r.Get("/search", handleSearch)
+	return r
+}
+
+func loadTemplates() {
+	templates = template.Must(template.ParseGlob("templates/*.html"))
+	templates = template.Must(templates.ParseGlob("templates/partials/*.html"))
+}
+
+func main() {
+	store.Seed()
+	loadTemplates()
 
 	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Fatal(http.ListenAndServe(":8080", newRouter()))
 }

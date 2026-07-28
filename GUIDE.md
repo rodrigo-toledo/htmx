@@ -440,25 +440,78 @@ of these automatically.
 
 ---
 
-## 3. Where htmx ends (and what you'd add)
+## 3. Where htmx ends — the drag-and-drop case study
 
 htmx 4 is unusually complete, but it has a hard edge: **everything is a
-round-trip.** Anything you want to happen *without* asking the server is out of
-scope. Concretely, in this app:
+round-trip.** Anything that must happen *continuously, without asking the
+server* is out of scope. Drag-and-drop is the clearest example, and this app
+implements it — so it's worth seeing exactly how the responsibility splits,
+because the answer is **not** "add Alpine."
 
-- **Optimistic UI** — the card waits for the server before moving. (v4's
-  `hx-optimistic` extension softens this.)
+**Neither htmx nor Alpine does the dragging.** A drag is pointer-tracking at
+60fps — a ghost element, hover targets, live reflow — all client-side. htmx
+deliberately doesn't do that, and Alpine has no drag primitive either (it's
+for declarative state: `x-data`, `x-show`, `x-model`). The canonical answer,
+shown in htmx's own examples, is a dedicated library: **SortableJS**.
+
+The division of labor in `static/dnd.js`:
+
+```js
+new Sortable(el, {
+    group: 'kanban',            // SortableJS owns the drag…
+    animation: 150,
+    onEnd: function (evt) {     // …htmx owns the persistence
+        const cardId = evt.item.id.replace('card-', '');
+        const col = evt.to.closest('.column').id.replace('col-', '');
+        htmx.ajax('POST', `/cards/${cardId}/drop`, {
+            target: evt.from.closest('.column'),
+            swap: 'outerHTML',
+            values: { col, index: evt.newIndex },
+        });
+    },
+});
+```
+
+SortableJS rearranges the DOM *locally* while you drag. On drop, one htmx
+request persists the new column + index; the confluent response/SSE
+re-render (§2.7) then reconciles **every** tab to the server's authoritative
+order — the same machinery the move buttons use.
+
+The one genuinely awkward part, and the real lesson: **htmx swaps destroy the
+DOM SortableJS is bound to.** Every column re-render replaces the `.cards`
+container, orphaning its Sortable instance. So the glue re-initializes after
+each settle, guarded so it's idempotent:
+
+```js
+function initSortables() {
+    document.querySelectorAll('.cards').forEach((el) => {
+        if (!el._sortable) el._sortable = makeSortable(el);
+    });
+}
+document.addEventListener('htmx:after:init', initSortables);
+document.addEventListener('htmx:after:settle', initSortables);
+```
+
+This "re-init JS widgets after swaps" pattern is the standard cost of mixing
+stateful client libraries with htmx's replace-the-DOM model. It's small here,
+but it's exactly the friction that grows as you add more widgets.
+
+The remaining seams — where Alpine *would* earn its keep — are the other
+client-only concerns:
+
+- **Optimistic UI** — the card waits for the server before moving on button
+  clicks. (v4's `hx-optimistic` extension softens this; drag-and-drop is
+  naturally optimistic since SortableJS moves it first.)
 - **Transient client state** — a custom delete-confirm modal, a dropdown, a
-  drag handle. All pure client, all awkward in htmx.
-- **Rich client validation** — we rely on the server's 422; instant per-keystroke
-  rules are client territory.
-- **Drag-and-drop reordering** — needs pointer tracking, not HTTP.
+  popover. All pure client, all awkward in htmx.
+- **Rich client validation** — we rely on the server's 422; instant
+  per-keystroke rules are client territory.
 
-That's the natural seam for **Alpine.js**: `x-data` for local state, `x-show` /
-`x-transition` for the transient bits, while htmx keeps owning everything that
-touches the server. htmx even ships an `hx-alpine-compat` extension so the two
-initialize swapped fragments together. The next pass on this project is to add
-Alpine at exactly these seams and measure what it buys.
+That's the natural seam for **Alpine.js**: `x-data` for local state,
+`x-show` / `x-transition` for the transient bits, while htmx keeps owning
+everything that touches the server. htmx even ships an `hx-alpine-compat`
+extension so the two initialize swapped fragments together. The next pass on
+this project is to add Alpine at exactly these seams and measure what it buys.
 
 ---
 
@@ -466,18 +519,19 @@ Alpine at exactly these seams and measure what it buys.
 
 | Attribute | File | Purpose |
 |---|---|---|
-| `hx-post` | card.html | move a card |
-| `hx-delete` + `hx-swap="delete"` | card.html | remove a card |
+| `hx-post` | card.html | move a card (◀ ▶) |
+| `hx-delete` + `hx-target="#col-{col}"` | card.html | remove a card (column re-render) |
 | `hx-get` + `hx-swap="outerHTML"` | card.html | enter edit mode |
 | `hx-patch` | card_edit.html | save a title |
 | `hx-trigger="keyup[key=='Escape']"` | card_edit.html | cancel edit |
 | `hx-trigger="input delay:300ms changed"` | index.html | debounced search |
-| `hx-target="closest .column"` | card.html | target own column |
-| `hx-swap="beforeend"` | index.html | append new card |
+| `hx-target="#col-{col}"` + `outerHTML` | card.html, column.html | confluent by-id targeting |
 | `hx-confirm` | card.html | delete confirmation |
 | `hx-indicator` | card.html, index.html | loading feedback |
 | `hx-swap-oob` | main.go (OOB handler), SSE payloads | multi-target update |
 | `<hx-partial>` | main.go (partial handler + SSE payloads) | explicit multi-target |
 | `hx-sse:connect` | layout.html | subscribe to `/events` |
 | `hx-swap="innerMorph"` | stats templates | state-preserving updates (OOB + SSE) |
+| `htmx.ajax()` + SortableJS `onEnd` | dnd.js | persist drag-and-drop |
+| `htmx:after:settle` | dnd.js | re-init Sortable after swaps |
 | `htmx-config` meta | layout.html | `sse.pauseOnBackground:false` |

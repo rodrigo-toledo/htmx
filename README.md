@@ -24,6 +24,7 @@ go run .
 | `hx-confirm` | Delete confirmation dialog |
 | Request indicators | `htmx-indicator` spinner on move + search |
 | SSE real-time (v4 model) | Unnamed messages carrying `hx-partial`/OOB fragments sync columns, counts, stats and feed across all tabs |
+| Drag & drop | SortableJS owns the drag, htmx persists the drop (`POST /cards/{id}/drop`); re-init glue on `htmx:after:settle` |
 | v4 error swaps | Empty title → 422 + form re-rendered with error |
 | `hx-swap="innerMorph"` | Stats bar morphs smoothly, preserving the progress-bar transition |
 | `htmx-config` meta | `sse.pauseOnBackground:false` keeps background tabs live |
@@ -53,6 +54,8 @@ cd e2e && npm install && cd ..
   cross-tab SSE, console hygiene (32 checks)
 - `replay.mjs` — kills one tab's stream, mutates from the other, and asserts
   the dropped tab catches up via `Last-Event-ID` replay — exactly once
+- `dnd.mjs` — real simulated mouse drags: cross-column drop, same-column
+  reorder, cross-tab sync, and persistence across a fresh page load
 
 ## Architecture
 

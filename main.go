@@ -127,6 +127,45 @@ func (s *Store) MoveCard(id int, dir string) (Card, string, bool) {
 	return Card{}, "", false
 }
 
+// DropCard places a card at a specific index within a column (drag & drop).
+// Order within a column is the order of appearance in s.cards.
+func (s *Store) DropCard(id int, targetCol string, newIndex int) (Card, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx := -1
+	for i, c := range s.cards {
+		if c.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return Card{}, "", false
+	}
+
+	card := s.cards[idx]
+	oldCol := card.Column
+	s.cards = append(s.cards[:idx], s.cards[idx+1:]...)
+	card.Column = targetCol
+
+	// insertion point = position of the card currently at newIndex in targetCol
+	colIdx := 0
+	insertAt := len(s.cards)
+	for i, c := range s.cards {
+		if c.Column != targetCol {
+			continue
+		}
+		if colIdx == newIndex {
+			insertAt = i
+			break
+		}
+		colIdx++
+	}
+	s.cards = append(s.cards[:insertAt], append([]Card{card}, s.cards[insertAt:]...)...)
+	return card, oldCol, true
+}
+
 func (s *Store) Counts() map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -447,6 +486,40 @@ func handleMoveCard(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 }
 
+func handleDropCard(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	targetCol := r.FormValue("col")
+	newIndex, _ := strconv.Atoi(r.FormValue("index"))
+	if _, ok := columnTitles[targetCol]; !ok {
+		w.WriteHeader(204)
+		return
+	}
+	card, oldCol, ok := store.DropCard(id, targetCol, newIndex)
+	if !ok {
+		w.WriteHeader(204)
+		return
+	}
+
+	var buf bytes.Buffer
+	if oldCol == targetCol {
+		broadcast(fmt.Sprintf(`Reordered "%s" in %s`, card.Title, columnTitles[targetCol]), func(b *bytes.Buffer) {
+			templates.ExecuteTemplate(b, "column_oob", columnData(targetCol))
+		})
+		templates.ExecuteTemplate(&buf, "column", columnData(targetCol))
+	} else {
+		broadcast(fmt.Sprintf(`Moved "%s" from %s to %s`, card.Title, columnTitles[oldCol], columnTitles[targetCol]), func(b *bytes.Buffer) {
+			templates.ExecuteTemplate(b, "column_oob", columnData(oldCol))
+			templates.ExecuteTemplate(b, "column_oob", columnData(targetCol))
+		})
+		templates.ExecuteTemplate(&buf, "column", columnData(oldCol))
+		templates.ExecuteTemplate(&buf, "column_oob", columnData(targetCol))
+	}
+	templates.ExecuteTemplate(&buf, "stats_sse", getStats())
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
 func handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -556,6 +629,7 @@ func main() {
 	r.Patch("/cards/{id}", handleUpdateCard)
 	r.Post("/cards/{id}/move", handleMoveCard)
 	r.Post("/cards/{id}/move-partial", handleMoveCardPartial)
+	r.Post("/cards/{id}/drop", handleDropCard)
 	r.Get("/events", handleEvents)
 	r.Get("/search", handleSearch)
 

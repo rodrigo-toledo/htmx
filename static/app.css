@@ -56,16 +56,35 @@ main {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-height: 44px; /* keep empty columns a viable drop target */
 }
 
 .card {
     background: #0f3460;
     border-radius: 6px;
     padding: 0.75rem 1rem;
-    cursor: default;
+    cursor: grab;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover {
+    box-shadow: 0 0 0 1px #1a4080;
+}
+
+.card button {
+    cursor: pointer;
+}
+
+.card-ghost {
+    opacity: 0.35;
+    background: #e94560;
+}
+
+.card-chosen {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
 .card-title {

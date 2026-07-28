@@ -40,14 +40,19 @@ To switch the UI to `<hx-partial>`, change the move buttons in
 
 ## Tests
 
-A puppeteer-based end-to-end suite drives two real Chrome tabs through the
-whole flow (move, edit, validate, create, delete, search, cross-tab SSE):
+Puppeteer-based end-to-end suites drive two real Chrome tabs through the app.
+Each suite runs against a fresh server instance:
 
 ```bash
-cd e2e && npm install
-go run . &            # server on :8080
-node test.mjs
+cd e2e && npm install && cd ..
+./e2e/run.sh            # all suites
+./e2e/run.sh replay     # just one
 ```
+
+- `test.mjs` — move, edit, 422 validation, create/delete counts, search,
+  cross-tab SSE, console hygiene (32 checks)
+- `replay.mjs` — kills one tab's stream, mutates from the other, and asserts
+  the dropped tab catches up via `Last-Event-ID` replay — exactly once
 
 ## Architecture
 

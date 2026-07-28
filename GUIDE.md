@@ -354,9 +354,40 @@ Two server-side gotchas we hit, both invisible in `curl` but fatal in-browser:
   the client sees *nothing* — not even response headers — until the first
   broadcast. htmx's connection hook never fires and early events are lost.
 - **`sse.pauseOnBackground` defaults to `true`**, pausing the stream in
-  background tabs. With no `Last-Event-ID` replay on our server, paused tabs
-  would miss events forever. We disable it in the layout:
+  background tabs. We disable it in the layout:
   `<meta name="htmx-config" content="sse.pauseOnBackground:false">`.
+
+And one design decision that turns "flaky" into "self-healing":
+
+- **Event ids + replay.** Streams drop — background pauses, wifi blips,
+  laptop sleep. Without replay, every event during the gap is lost forever
+  and the tab stays stale until a manual refresh. So every broadcast carries
+  an `id:`, the hub keeps a ring buffer of recent messages, and on reconnect
+  the server replays whatever the client missed:
+
+  ```go
+  // main.go — the client's last-seen id arrives as a standard SSE header
+  lastID := 0
+  if v := r.Header.Get("Last-Event-ID"); v != "" {
+      lastID, _ = strconv.Atoi(v)
+  }
+  ch, missed := hub.Subscribe(lastID)   // subscribe + snapshot under one lock
+  for _, m := range missed {
+      fmt.Fprint(w, m.frame())          // replay, then stream live
+  }
+  ```
+
+  The hx-sse extension sends `Last-Event-ID` on reconnect automatically — no
+  client markup needed. `Subscribe` registers the client and snapshots the
+  buffer under the *same* lock that `Broadcast` uses, so catch-up is
+  gap-free and duplicate-free. A 15-second comment heartbeat (`: ping`)
+  keeps idle connections from being killed by intermediaries. The e2e suite
+  verifies this by killing a tab's stream mid-test and asserting it catches
+  up — exactly once — after reconnecting.
+
+With replay in place, `pauseOnBackground:true` (the default) would also be a
+legitimate choice: background tabs disconnect to save resources and simply
+catch up when refocused. We keep it `false` so background tabs stay live too.
 
 The crucial architecture note: **SSE is a side-channel, not the source of
 truth.** The tab that performed the move updates via the normal htmx response

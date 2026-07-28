@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -155,49 +156,83 @@ var columnTitles = map[string]string{
 	"done":  "Done",
 }
 
-type SSEHub struct {
-	mu      sync.RWMutex
-	clients map[chan string]bool
+type sseMessage struct {
+	id   int
+	data string
 }
+
+// frame renders the message in SSE wire format. The id line is what lets a
+// reconnecting client resume: the hx-sse extension sends Last-Event-ID and we
+// replay everything it missed.
+func (m sseMessage) frame() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "id: %d\n", m.id)
+	for _, line := range strings.Split(m.data, "\n") {
+		sb.WriteString("data: ")
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+type SSEHub struct {
+	mu      sync.Mutex
+	clients map[chan sseMessage]bool
+	history []sseMessage
+	nextID  int
+}
+
+const historyLimit = 100
 
 func NewSSEHub() *SSEHub {
-	return &SSEHub{clients: make(map[chan string]bool)}
+	return &SSEHub{clients: make(map[chan sseMessage]bool)}
 }
 
-func (h *SSEHub) Subscribe() chan string {
+// Subscribe registers a client and, atomically, returns every buffered
+// message after lastID. Doing both under one lock makes catch-up gap-free:
+// broadcasts before the lock are in history; broadcasts after go to the
+// channel; nothing falls between.
+func (h *SSEHub) Subscribe(lastID int) (chan sseMessage, []sseMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	ch := make(chan string, 16)
+	ch := make(chan sseMessage, 64)
 	h.clients[ch] = true
-	return ch
+	var missed []sseMessage
+	for _, m := range h.history {
+		if m.id > lastID {
+			missed = append(missed, m)
+		}
+	}
+	return ch, missed
 }
 
-func (h *SSEHub) Unsubscribe(ch chan string) {
+func (h *SSEHub) Unsubscribe(ch chan sseMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.clients, ch)
 	close(ch)
 }
 
-// Broadcast sends one unnamed SSE message. Multi-line payloads are framed
-// with a "data:" prefix per line, as the SSE wire format requires. Unnamed
-// messages are what htmx 4's hx-sse extension swaps; the targeting lives in
-// the payload itself (hx-partial / hx-swap-oob fragments).
+// Broadcast sends one unnamed SSE message to every connected client and
+// appends it to the replay buffer. Unnamed messages are what htmx 4's hx-sse
+// extension swaps; the targeting lives in the payload itself (hx-partial /
+// hx-swap-oob fragments).
 func (h *SSEHub) Broadcast(data string) {
-	var msg strings.Builder
-	for _, line := range strings.Split(data, "\n") {
-		msg.WriteString("data: ")
-		msg.WriteString(line)
-		msg.WriteString("\n")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.nextID++
+	msg := sseMessage{id: h.nextID, data: data}
+	h.history = append(h.history, msg)
+	if len(h.history) > historyLimit {
+		h.history = h.history[len(h.history)-historyLimit:]
 	}
-	msg.WriteString("\n")
-	out := msg.String()
-	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for ch := range h.clients {
 		select {
-		case ch <- out:
+		case ch <- msg:
 		default:
+			// slow client drops live messages; it catches up via replay
+			// the next time its connection resets
 		}
 	}
 }
@@ -411,15 +446,34 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	// not at the first broadcast. Without this, Go buffers the response and
 	// htmx never sees the stream until some mutation happens.
 	fmt.Fprint(w, ": connected\n\n")
-	w.(http.Flusher).Flush()
+	flusher.Flush()
 
-	ch := hub.Subscribe()
+	// Reconnecting clients (the hx-sse extension does this automatically)
+	// tell us the last message they saw; replay what they missed.
+	lastID := 0
+	if v := r.Header.Get("Last-Event-ID"); v != "" {
+		lastID, _ = strconv.Atoi(v)
+	}
+	ch, missed := hub.Subscribe(lastID)
 	defer hub.Unsubscribe(ch)
+
+	for _, m := range missed {
+		fmt.Fprint(w, m.frame())
+	}
+	flusher.Flush()
+
+	// Heartbeat keeps intermediaries from killing the idle connection and
+	// surfaces dead clients promptly. Comments are ignored by SSE clients.
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case msg := <-ch:
-			fmt.Fprint(w, msg)
+			fmt.Fprint(w, msg.frame())
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		case <-r.Context().Done():
 			return

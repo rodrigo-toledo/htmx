@@ -43,12 +43,15 @@ check('B caught up: event 1 replayed', bFeed.includes('Build kanban board'));
 check('B caught up: event 2 replayed', bFeed.includes('Explore hx-swap'));
 check('no duplicate deliveries', count('Build kanban board') === 1 && count('Explore hx-swap') === 1);
 check('B stats reflect final state', (await stats(tabB)).includes('Todo: 0') && (await stats(tabB)).includes('Done: 2'));
+check('B board caught up: card 2 in doing', await tabB.evaluate(() => !!document.querySelector('#col-doing #card-2')));
+check('B board caught up: card 3 in done', await tabB.evaluate(() => !!document.querySelector('#col-done #card-3')));
 check('B connection alive again', await sseUp(tabB));
 
 // and live sync still works after recovery
 await tabA.evaluate(() => { document.querySelector('.add-form input[name="title"]').value = 'After reconnect'; document.querySelector('.add-form button[type="submit"]').click(); });
 await sleep(800);
 check('B receives post-recovery live event', (await feed(tabB)).includes('After reconnect'));
+check('B board shows post-recovery card', (await tabB.evaluate(() => document.querySelector('#col-todo .cards').textContent)).includes('After reconnect'));
 
 await browser.close();
 console.log(failures === 0 ? '\nALL REPLAY CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);

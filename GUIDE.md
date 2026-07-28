@@ -67,7 +67,7 @@ column it's in — it just says "the column I live in."
 | `innerHTML` (default) | replace children | — |
 | `outerHTML` | replace the element itself | card ↔ edit form, columns |
 | `beforeend` | append as last child | new card into list |
-| `delete` *(v4)* | remove the element, ignore response | deleting a card |
+| `delete` *(v4)* | remove the element, ignore response | (not in the live UI — see note) |
 | `innerMorph` *(v4)* | morph children, preserving state | stats bar |
 
 The click-to-edit pattern is just two `outerHTML` swaps in opposite directions:
@@ -82,6 +82,12 @@ The click-to-edit pattern is just two `outerHTML` swaps in opposite directions:
 
 The server decides which of the two shapes to return. The client has no idea
 it's "editing" — it's just swapping HTML.
+
+**Note on `delete`:** it's a great fit when the actor alone removes an
+element. This app doesn't use it for card deletion, because a delete must
+also reach *other* tabs — so the delete button swaps the whole column by id
+(`hx-target="#col-{{.Column}}" hx-swap="outerHTML"`), the same confluent
+fragment SSE delivers to everyone else (§2.7).
 
 ### 1.4 `hx-trigger` — when, and with what temperament
 
@@ -318,16 +324,17 @@ changed from htmx 2**. Two rules:
    DOM events, which you handle with `hx-on:foo` or
    `hx-trigger="foo from:body"`.
 
-Our board needs to update *two* regions (feed + stats) from one stream, so we
-use the docs' "update elements" pattern: the server streams **unnamed**
-messages whose payload carries its own targeting via `<hx-partial>` and
-`hx-swap-oob`:
+Our board needs to update *several* regions (feed, stats, and the affected
+columns) from one stream, so we use the docs' "update elements" pattern: the
+server streams **unnamed** messages whose payload carries its own targeting
+via `<hx-partial>` and `hx-swap-oob`:
 
 ```go
-// main.go — broadcastActivity
+// main.go — broadcast (called by every mutation handler)
 buf.WriteString(`<hx-partial hx-target="#feed-items" hx-swap="beforeend"><div class="feed-item">`)
 buf.WriteString(template.HTMLEscapeString(action))
 buf.WriteString(`</div></hx-partial>`)
+board(&buf)                                          // the affected columns/cards, as OOB fragments
 templates.ExecuteTemplate(&buf, "stats_sse", getStats())  // <div id="stats" hx-swap-oob="innerMorph">…
 hub.Broadcast(buf.String())
 ```
@@ -389,10 +396,22 @@ With replay in place, `pauseOnBackground:true` (the default) would also be a
 legitimate choice: background tabs disconnect to save resources and simply
 catch up when refocused. We keep it `false` so background tabs stay live too.
 
-The crucial architecture note: **SSE is a side-channel, not the source of
-truth.** The tab that performed the move updates via the normal htmx response
-(OOB). *Other* tabs update via SSE. Same server state, two delivery paths, no
-client-side model to reconcile. Open two tabs and move a card to see both.
+The crucial architecture note: **the acting tab gets each mutation twice** —
+once from its own HTTP response (immediate, reliable, works even if the
+stream is down) and once from the SSE broadcast (the same fragments every
+other tab receives). That only stays safe because the updates are
+*confluent*: every fragment — response or SSE — targets the same element
+**by id**, swaps `outerHTML`, and carries identical content. Apply them in
+any order, twice, and you land on the same state. This is why the move
+buttons target `#col-{{.Column}}` instead of `closest .column`: if the SSE
+swap wins the race and replaces the button's column first, the response swap
+still resolves against a live node by id, not a detached one.
+
+The payoff is that *every* tab is a full participant: move a card in one and
+the columns, counts, stats, and feed update in all the others — no refresh,
+no client-side model to reconcile. The response remains the actor's source
+of truth for its own action; SSE is how everyone (including the actor,
+idempotently) converges.
 
 If you *do* want named events, the v4 shape is:
 

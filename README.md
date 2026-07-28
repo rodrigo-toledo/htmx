@@ -16,14 +16,14 @@ go run .
 | htmx concept | Where |
 |---|---|
 | AJAX from any element | Move/delete buttons (`hx-post`, `hx-delete`) |
-| `hx-target` / `hx-swap` | Card swaps (`outerHTML`), list append (`beforeend`), removal (`delete`) |
+| `hx-target` / `hx-swap` | Card swaps (`outerHTML`), column swaps by id, removal via column re-render |
 | Inline editing | Edit button → form → save/cancel/Escape |
 | Multi-target (OOB) | Move updates source column + dest column + stats in one response |
 | `<hx-partial>` (v4) | Alternative move endpoint + SSE payloads |
 | `hx-trigger` modifiers | Search: `input delay:300ms changed` |
 | `hx-confirm` | Delete confirmation dialog |
 | Request indicators | `htmx-indicator` spinner on move + search |
-| SSE real-time (v4 model) | Unnamed messages carrying `hx-partial`/OOB fragments update feed + stats across tabs |
+| SSE real-time (v4 model) | Unnamed messages carrying `hx-partial`/OOB fragments sync columns, counts, stats and feed across all tabs |
 | v4 error swaps | Empty title → 422 + form re-rendered with error |
 | `hx-swap="innerMorph"` | Stats bar morphs smoothly, preserving the progress-bar transition |
 | `htmx-config` meta | `sse.pauseOnBackground:false` keeps background tabs live |

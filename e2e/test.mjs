@@ -80,6 +80,8 @@ check('B: feed item appeared via SSE', (await text(tabB, '#feed-items')).include
 check('B: stats updated via SSE', (await text(tabB, '#stats')).includes('Doing: 2'));
 check('B: stats kept class after SSE morph', await hasClass(tabB, '#stats', 'stats'));
 check('B: progress bar present after morph', await q(tabB, '#stats .progress-fill'));
+check('B: card 1 moved on board via SSE', await q(tabB, '#col-doing #card-1') && !(await q(tabB, '#col-todo #card-1')));
+check('B: column counts updated via SSE', (await text(tabB, '#count-todo')) === '(1)' && (await text(tabB, '#count-doing')) === '(2)');
 
 // --- boundary buttons: done-column card has only ◀ ---
 check('A: done card has exactly 1 move btn (◀)', await tabA.evaluate(() => document.querySelectorAll('#col-done .card .btn-move').length === 1));
@@ -100,6 +102,7 @@ await tabA.evaluate(() => {
 await click(tabA, '#card-2 form button[type="submit"]');
 await sleep(500);
 check('A: edit saved, view restored', (await text(tabA, '#card-2 .card-title')).includes('(edited)'));
+check('B: edited title synced via SSE', (await text(tabB, '#card-2 .card-title')).includes('(edited)'));
 
 // --- validation: empty title → 422 re-renders form with error ---
 await click(tabA, '#card-2 .btn-edit');
@@ -119,6 +122,7 @@ await sleep(500);
 check('A: new card appended', (await text(tabA, '#col-todo .cards')).includes('Fresh card'));
 check('A: todo count updated on create', (await text(tabA, '#count-todo')) === '(3)');
 check('B: create arrived via SSE', (await text(tabB, '#feed-items')).includes('Fresh card'));
+check('B: new card on board via SSE', (await text(tabB, '#col-todo .cards')).includes('Fresh card'));
 
 // --- delete: confirm dialog + count updates ---
 tabA.once('dialog', (d) => d.accept());
@@ -126,6 +130,7 @@ await click(tabA, '#col-todo .card:last-child .btn-delete');
 await sleep(500);
 check('A: card removed', !(await text(tabA, '#col-todo .cards')).includes('Fresh card'));
 check('A: todo count updated on delete', (await text(tabA, '#count-todo')) === '(2)');
+check('B: card removed on board via SSE', !(await text(tabB, '#col-todo .cards')).includes('Fresh card'));
 
 // --- search (debounced) ---
 await tabA.evaluate(() => {

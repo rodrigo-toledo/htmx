@@ -1,31 +1,41 @@
 {{define "card"}}
 <div class="card" id="card-{{.ID}}">
-    <span class="card-title">{{.Title}}</span>
-    <span class="card-actions">
-        {{if ne .Column "todo"}}
-        <button class="btn-move"
-                hx-post="/cards/{{.ID}}/move?dir=left"
-                hx-target="closest .column"
-                hx-swap="outerHTML"
-                hx-indicator="closest .card .move-spinner">◀</button>
-        {{end}}
-        {{if ne .Column "done"}}
-        <button class="btn-move"
-                hx-post="/cards/{{.ID}}/move?dir=right"
-                hx-target="closest .column"
-                hx-swap="outerHTML"
-                hx-indicator="closest .card .move-spinner">▶</button>
-        {{end}}
-        <span class="move-spinner htmx-indicator">...</span>
-        <button class="btn-edit"
-                hx-get="/cards/{{.ID}}/edit"
-                hx-target="#card-{{.ID}}"
-                hx-swap="outerHTML">Edit</button>
-        <button class="btn-delete"
-                hx-delete="/cards/{{.ID}}"
-                hx-target="#card-{{.ID}}"
-                hx-swap="delete"
-                hx-confirm="Delete this card?">×</button>
-    </span>
+    {{template "card_inner" .}}
 </div>
+{{end}}
+
+{{define "card_oob"}}
+<div class="card" id="card-{{.ID}}" hx-swap-oob="outerHTML">
+    {{template "card_inner" .}}
+</div>
+{{end}}
+
+{{define "card_inner"}}
+<span class="card-title">{{.Title}}</span>
+<span class="card-actions">
+    {{if ne .Column "todo"}}
+    <button class="btn-move"
+            hx-post="/cards/{{.ID}}/move?dir=left"
+            hx-target="#col-{{.Column}}"
+            hx-swap="outerHTML"
+            hx-indicator="closest .card .move-spinner">◀</button>
+    {{end}}
+    {{if ne .Column "done"}}
+    <button class="btn-move"
+            hx-post="/cards/{{.ID}}/move?dir=right"
+            hx-target="#col-{{.Column}}"
+            hx-swap="outerHTML"
+            hx-indicator="closest .card .move-spinner">▶</button>
+    {{end}}
+    <span class="move-spinner htmx-indicator">...</span>
+    <button class="btn-edit"
+            hx-get="/cards/{{.ID}}/edit"
+            hx-target="#card-{{.ID}}"
+            hx-swap="outerHTML">Edit</button>
+    <button class="btn-delete"
+            hx-delete="/cards/{{.ID}}"
+            hx-target="#col-{{.Column}}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this card?">×</button>
+</span>
 {{end}}

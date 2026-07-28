@@ -7,8 +7,20 @@ demonstrated here, and [PLAN.md](PLAN.md) for the staged build plan.
 ## Run
 
 ```bash
-go run .
+make run        # or: go run .
 # open http://localhost:8080 in two tabs to see the real-time sync
+```
+
+## Commands
+
+A thin `Makefile` wraps the common tasks (run `make` to list them all):
+
+```bash
+make run     # start the server
+make test    # Go unit + handler tests
+make cover   # tests with a coverage report
+make e2e     # browser end-to-end suites (auto-installs JS deps once)
+make check   # full gate: vet + test + e2e
 ```
 
 ## What it demonstrates
@@ -42,14 +54,13 @@ To switch the UI to `<hx-partial>`, change the move buttons in
 
 ## Tests
 
-Two layers, a fast inner loop and a slow real-browser one:
+Two layers, a fast inner loop and a slow real-browser one (both wrapped by
+`make`, or run directly):
 
 ```bash
-go test ./...            # unit + handler tests (~0.5s, no browser)
-
-cd e2e && npm install && cd ..
-./e2e/run.sh             # all e2e suites (drives real Chrome)
-./e2e/run.sh replay      # just one
+make test            # == go test ./...        (~0.5s, no browser)
+make e2e             # == ./e2e/run.sh         (drives real Chrome)
+./e2e/run.sh replay  # run a single e2e suite
 ```
 
 **Go (`go test ./...`)**

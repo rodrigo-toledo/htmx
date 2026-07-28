@@ -384,12 +384,6 @@ func columnData(col string) ColumnData {
 	return ColumnData{ID: col, Title: columnTitles[col], Cards: store.CardsByColumn(col)}
 }
 
-func renderColumnHTML(col string) string {
-	var buf bytes.Buffer
-	templates.ExecuteTemplate(&buf, "column", columnData(col))
-	return buf.String()
-}
-
 func handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	if title == "" {
